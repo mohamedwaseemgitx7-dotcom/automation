@@ -1,4 +1,6 @@
-"""Starts/stops the Node WhatsApp bridge and talks to it over localhost with a shared secret."""
+"""Talks to the Node WhatsApp bridge with a shared secret.
+BRIDGE_MODE=local    -> backend starts the bridge as a child process (laptop).
+BRIDGE_MODE=external -> the bridge is its own container with its own restart policy (server); never spawned here."""
 import logging
 import os
 import subprocess
@@ -33,6 +35,10 @@ def start() -> None:
     st = get_settings()
     if not st.bridge_secret or not st.wa_session_key:
         raise BridgeError("BRIDGE_SECRET / WA_SESSION_KEY missing in backend/.env")
+    if st.bridge_mode == "external":
+        if not running():
+            raise BridgeError("WhatsApp bridge container is not reachable")
+        return
     with _lock:
         if running():
             return

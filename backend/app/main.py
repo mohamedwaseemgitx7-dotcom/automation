@@ -282,9 +282,42 @@ def logs(user: str = Depends(require_owner)):
         return [{"at": r.at.isoformat(), "actor": r.actor, "action": r.action, "detail": r.detail} for r in rows]
 
 
-@app.get("/api/health")
-def health():
+@app.get("/api/live", include_in_schema=False)
+def live():
+    """Container liveness only (is the web server answering). Full status: /api/health."""
     return {"status": "ok"}
+
+
+@app.get("/api/health")
+def health(response: Response):
+    """Real status for uptime monitors. Public, so it shows status words only - no names, numbers or data.
+    503 when anything the bot needs is down, so an external monitor emails the owner."""
+    import shutil
+    from sqlalchemy import text as sql
+    checks: dict[str, str] = {}
+    try:
+        with db.session() as s:
+            s.execute(sql("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:  # noqa: BLE001 - any DB failure is "down"
+        checks["database"] = "down"
+    names = {m.get("name", "") for m in Ollama().models()}
+    checks["llm"] = "ok" if any(n.startswith(st.chat_model) for n in names) and \
+        any(n.startswith(st.embed_model) for n in names) else "down"
+    linked = (st.storage_dir / "whatsapp_sessions" / "default" / "creds.enc").exists()
+    wa = "not_linked"
+    if linked:
+        try:
+            wa = "ok" if wa_bridge.call("GET", "/status").get("status") == "connected" else "down"
+        except wa_bridge.BridgeError:
+            wa = "down"
+    checks["whatsapp"] = wa
+    du = shutil.disk_usage(st.storage_dir)
+    checks["disk"] = "ok" if du.free > 5 * 1024**3 else "low"     # < 5 GB free: DB, uploads and backups at risk
+    healthy = all(v in ("ok", "not_linked") for v in checks.values())
+    if not healthy:
+        response.status_code = 503
+    return {"status": "ok" if healthy else "degraded", **checks}
 
 
 # ---------------- WhatsApp (unofficial linked device) ----------------

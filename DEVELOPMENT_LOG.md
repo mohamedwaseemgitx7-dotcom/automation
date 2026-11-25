@@ -5,7 +5,9 @@ Plan: `D:\D drive\Local AI WhatsApp Agent Plan\Local_AI_WhatsApp_Agent_Plan_v3.p
 ## Run
 
 ```powershell
-.\run-agent.ps1                         # http://127.0.0.1:8100 (dashboard + API, this PC only)
+.\start-agent.ps1                       # starts Ollama + agent, reconnects WhatsApp, loads models, opens dashboard
+.\stop-agent.ps1                        # stops agent + WhatsApp (session kept); add -Ollama to stop the AI too
+.\run-agent.ps1                         # backend only, in the foreground (debugging)
 backend\.venv\Scripts\python -m pytest -q backend\tests
 ```
 Owner login: username `owner`. A random first password is in `backend\.owner-password.txt` (git-ignored).
@@ -89,6 +91,18 @@ Change it with `backend\.venv\Scripts\python backend\scripts\set_password.py`.
 - **Message bursts:** 8 messages per contact per minute are answered; the 9th gets one "please contact the owner"
   note (owner alerted in Logs); further messages that minute are stored silently – no reply spam.
 - 20 backend tests pass.
+
+### Server-ready code (25 Nov, late) – plan: docs/DEPLOYMENT_PLAN_24x7.md
+- Hosting decision: Oracle A1 free VM (owner's debit card), public URL via Tailscale Funnel (no domain). Railway / Vercel /
+  Cloudflare-without-domain checked and rejected (0.5 GB RAM / no always-on process / random URL).
+- `BRIDGE_MODE=external`: on the server the WhatsApp bridge is its own container; bridge host configurable (`BRIDGE_HOST`).
+- Laptop node path moved to `.env` (`NODE_EXE`), code default is `node`.
+- `/api/health` now checks DB, models, WhatsApp, disk and returns 503 when degraded (status words only). `/api/live` for Docker.
+- Postgres driver (`psycopg` 3.3.9), pinned `requirements.txt`, `scripts/copy_sqlite_to_postgres.py` (refuses non-empty target).
+- `deploy/`: arm64-ready Dockerfiles (non-root), compose (postgres, ollama, backend, wa-bridge, tailscale funnel,
+  nightly AES-encrypted backups), no published ports. Compose file validated; containers not run on the laptop
+  (Docker Desktop stores data on C:) – first real run will be on the VM.
+- 20 tests pass.
 
 ### Outstanding
 - Model downloads are slow/unstable on this connection (retrying automatically). Real-model readiness run and

@@ -28,6 +28,17 @@ let retries = 0
 let wanted = false
 const seen = new Set()
 const typingSince = new Map()
+// "online" only while answering, like a person opening WhatsApp; offline again ~20 s after the last reply
+const ONLINE_GRACE_MS = 20000
+let offlineTimer = null
+async function goOnline () {
+  clearTimeout(offlineTimer)
+  await sock?.sendPresenceUpdate('available').catch(() => {})
+}
+function goOfflineLater () {
+  clearTimeout(offlineTimer)
+  offlineTimer = setTimeout(() => { sock?.sendPresenceUpdate('unavailable').catch(() => {}) }, ONLINE_GRACE_MS)
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 // Natural pacing: a short reply appears after ~2 s, a long one after up to ~9 s (counted from when typing started).
 const humanDelay = text => Math.min(9000, 1800 + text.length * 35)
@@ -170,10 +181,12 @@ const server = http.createServer(async (req, res) => {
       if (!validJid(b.jid)) return send(400, { error: 'bad jid' })
       if (req.url === '/read') {
         if (typeof b.id !== 'string') return send(400, { error: 'bad id' })
+        await goOnline()
         await sock.readMessages([{ remoteJid: b.jid, id: b.id, fromMe: false }])
         return send(200, { ok: true })
       }
       if (req.url === '/typing') {
+        await goOnline()
         await sock.sendPresenceUpdate('composing', b.jid)
         typingSince.set(b.jid, Date.now())
         return send(200, { ok: true })
@@ -188,6 +201,7 @@ const server = http.createServer(async (req, res) => {
       typingSince.delete(b.jid)
       const sent = await sock.sendMessage(b.jid, { text: b.text })
       await sock.sendPresenceUpdate('paused', b.jid).catch(() => {})
+      goOfflineLater()
       return send(200, { id: sent?.key?.id || null })
     }
     return send(404, { error: 'not found' })
@@ -196,8 +210,10 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`wa-bridge listening on 127.0.0.1:${PORT} (unofficial WhatsApp linked device)`)
+// 127.0.0.1 on the laptop; in Docker BRIDGE_HOST=0.0.0.0 on the private compose network only (port never published)
+const HOST = process.env.BRIDGE_HOST || '127.0.0.1'
+server.listen(PORT, HOST, () => {
+  console.log(`wa-bridge listening on ${HOST}:${PORT} (unofficial WhatsApp linked device)`)
   // restore a saved session automatically
   import('node:fs').then(fs => { if (fs.existsSync(`${SESSION_DIR}/creds.enc`)) connect().catch(e => setState({ status: 'error', lastError: e.message })) })
 })

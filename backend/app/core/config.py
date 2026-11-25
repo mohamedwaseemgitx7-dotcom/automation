@@ -34,18 +34,19 @@ class Settings(BaseSettings):
 
     max_contacts: int = 5
 
-    # WhatsApp bridge (Node sidecar, localhost only)
+    # WhatsApp bridge (Node sidecar). "local": backend starts it (laptop). "external": its own container (server).
+    bridge_mode: str = "local"
     bridge_url: str = "http://127.0.0.1:8200"
     bridge_secret: str = ""
     wa_session_key: str = ""
-    node_exe: str = "D:/node.exe"
+    node_exe: str = "node"
     bridge_dir: Path = ROOT / "wa-bridge"
     reply_timeout_s: float = 180.0
 
     @field_validator("database_url", mode="before")
     @classmethod
     def _db(cls, v):
-        return v or f"sqlite:///{(ROOT / 'storage' / 'agent.db').as_posix()}"
+        return v or f"sqlite:///{(ROOT / 'storage' / 'agent.db').as_posix()}"   # laptop default; server uses Postgres
 
 
 @lru_cache

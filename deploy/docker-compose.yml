@@ -1,0 +1,110 @@
+# Production stack for one VM (Oracle A1 arm64, 2 OCPU / 12 GB). Start: docker compose up -d
+# Nothing is published to the internet: no "ports:" anywhere. The only way in is Tailscale Funnel (HTTPS).
+# Secrets live only in deploy/.env on the server (chmod 600, never committed).
+name: smartech-agent
+
+x-restart: &restart
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  postgres:
+    <<: *restart
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 10s
+      retries: 10
+    mem_limit: 1g
+
+  ollama:
+    <<: *restart
+    image: ollama/ollama:0.40.2
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"          # keep the model in RAM: no 30-60 s reload on the first message
+      OLLAMA_MAX_LOADED_MODELS: "2"    # chat + embeddings
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes: [ollama-models:/root/.ollama]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      retries: 5
+    mem_limit: 8g
+
+  backend:
+    <<: *restart
+    build: { context: .., dockerfile: deploy/backend.Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent:${POSTGRES_PASSWORD}@postgres:5432/agent
+      OLLAMA_URL: http://ollama:11434
+      BRIDGE_MODE: external
+      BRIDGE_URL: http://wa-bridge:8200
+      COOKIE_SECURE: "true"
+      STORAGE_DIR: /data
+    volumes:
+      - app-storage:/data
+      - wa-session:/data/whatsapp_sessions/default:ro   # read-only: backend only checks the session exists
+    depends_on:
+      postgres: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+    mem_limit: 1536m
+
+  wa-bridge:
+    <<: *restart
+    build: { context: .., dockerfile: deploy/bridge.Dockerfile }
+    environment:
+      BRIDGE_SECRET: ${BRIDGE_SECRET:?set in deploy/.env}
+      WA_SESSION_KEY: ${WA_SESSION_KEY:?set in deploy/.env}
+      BACKEND_URL: http://backend:8100
+    volumes: [wa-session:/session]
+    depends_on: [backend]
+    mem_limit: 512m
+
+  tailscale:
+    <<: *restart
+    image: tailscale/tailscale:stable
+    hostname: smartech-agent
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set in deploy/.env}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/funnel.json
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./funnel.json:/config/funnel.json:ro
+    depends_on: [backend]
+
+  backup:
+    <<: *restart
+    image: postgres:17-alpine
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: agent
+      PGDATABASE: agent
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_KEY: ${BACKUP_KEY:?set in deploy/.env}
+      KEEP_DAYS: "14"
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - backups:/backups
+      - app-storage:/src/storage:ro
+      - wa-session:/src/session:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  ollama-models:
+  app-storage:
+  wa-session:
+  tailscale-state:
+  backups:
