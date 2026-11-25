@@ -1,0 +1,51 @@
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+**/.owner-password.txt
+*.pem
+*.key
+*.p12
+creds*.json
+creds.enc
+
+# --- Runtime data: database, WhatsApp session, uploads, logs ---
+storage/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+
+# --- Client data (repo is public) ---
+samples/
+reports/
+
+# --- Python ---
+backend/.venv/
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node / frontend ---
+**/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# --- Big files / models (keep the repo small) ---
+*.gguf
+*.safetensors
+*.bin
+*.zip
+*.mp4
+*.mp3
+*.ogg
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
